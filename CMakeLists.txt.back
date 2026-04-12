@@ -1,0 +1,40 @@
+cmake_minimum_required(VERSION 3.10)
+project(flow_ids VERSION 1.0.0 LANGUAGES CXX)
+
+# ---- Default install prefix ----
+# If the user did not explicitly set an install prefix, install into
+# <source>/install by default (nice for local/dev deployments).
+if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
+  set(CMAKE_INSTALL_PREFIX "${CMAKE_SOURCE_DIR}/install"
+      CACHE PATH "Default install prefix" FORCE)
+endif()
+
+# ---- Build settings ----
+set(CMAKE_CXX_STANDARD 11)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+
+if(NOT CMAKE_BUILD_TYPE)
+  set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
+endif()
+
+add_compile_options(-Wall -Wextra)
+
+find_package(Threads REQUIRED)
+
+include_directories(./3rd/rknn/includes)
+
+link_directories(./3rd/rknn/libs)
+
+# main 可执行文件 - RKNN 推理示例
+add_executable(main main.cc flow_detection.cc)
+target_link_libraries(main
+    rknnrt
+    Threads::Threads
+)
+add_executable(hello_world hello_world.cc)
+# flow_detection 可执行文件
+# add_executable(flow_detection flow_detection.cc)
+# target_link_libraries(flow_detection
+#     rknnrt
+# )

@@ -1,0 +1,163 @@
+{
+  "numerical_features": [
+    "IN_PKTS",
+    "OUT_PKTS",
+    "IN_BYTES",
+    "OUT_BYTES",
+    "FLOW_DURATION_MILLISECONDS"
+  ],
+  "categorical_features": [
+    "L4_SRC_PORT",
+    "L4_DST_PORT",
+    "PROTOCOL",
+    "L7_PROTO",
+    "TCP_FLAGS"
+  ],
+  "numerical_params": {
+    "IN_PKTS": {
+      "min": 0.0,
+      "range": 335.0
+    },
+    "OUT_PKTS": {
+      "min": 1.0,
+      "range": 534.0
+    },
+    "IN_BYTES": {
+      "min": 0.0,
+      "range": 105056.0
+    },
+    "OUT_BYTES": {
+      "min": 60.0,
+      "range": 696118.0
+    },
+    "FLOW_DURATION_MILLISECONDS": {
+      "min": 0.0,
+      "range": 3483.0
+    }
+  },
+  "categorical_params": {
+    "L4_SRC_PORT": {
+      "levels": [
+        80,
+        60172,
+        0,
+        36390,
+        65009,
+        53141,
+        2210,
+        23336,
+        443,
+        26839,
+        30270,
+        49781,
+        52996,
+        5353,
+        45131,
+        51043,
+        53838,
+        55608,
+        4977,
+        24938,
+        32599,
+        52711,
+        52831,
+        54449,
+        59108,
+        60936,
+        65086,
+        9531,
+        11147,
+        12750,
+        14458,
+        23673
+      ],
+      "n_levels": 32
+    },
+    "L4_DST_PORT": {
+      "levels": [
+        80,
+        53,
+        60172,
+        53141,
+        0,
+        51043,
+        443,
+        65009,
+        59108,
+        20000,
+        5353,
+        55608,
+        55749,
+        57891,
+        61096,
+        26839,
+        36390,
+        52831,
+        52996,
+        54069,
+        60275,
+        65086,
+        5350,
+        32599,
+        41051,
+        49781,
+        50363,
+        52711,
+        58035,
+        65516,
+        152,
+        2235
+      ],
+      "n_levels": 32
+    },
+    "PROTOCOL": {
+      "levels": [
+        6,
+        17,
+        1
+      ],
+      "n_levels": 3
+    },
+    "L7_PROTO": {
+      "levels": [
+        "HTTP",
+        "DNS",
+        "DTLS",
+        "STUN",
+        "TLS",
+        "ICMP",
+        "Unknown",
+        "MDNS",
+        "IMAP",
+        "Whois-DAS",
+        "AFP",
+        "FTP_DATA",
+        "IRC",
+        "NetBIOS",
+        "POP3",
+        "RSYNC",
+        "SMTP",
+        "SMTPS",
+        "Telnet",
+        "VMware",
+        "Z3950",
+        "s7comm"
+      ],
+      "n_levels": 22
+    },
+    "TCP_FLAGS": {
+      "levels": [
+        0,
+        20,
+        2,
+        22,
+        24,
+        16
+      ],
+      "n_levels": 6
+    }
+  },
+  "window_size": 8,
+  "top_k": 32,
+  "clip_numerical": false
+}

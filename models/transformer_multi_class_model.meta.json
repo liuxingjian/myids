@@ -1,0 +1,22 @@
+{
+  "model_input_names": [
+    "input_OUT_PKTS",
+    "input_IN_BYTES",
+    "input_OUT_BYTES",
+    "input_IN_PKTS",
+    "input_FLOW_DURATION_MILLISECONDS",
+    "input_L4_SRC_PORT",
+    "input_L4_DST_PORT",
+    "input_PROTOCOL",
+    "input_L7_PROTO",
+    "input_TCP_FLAGS"
+  ],
+  "model_expected_dims": {
+    "L4_SRC_PORT": 32,
+    "L4_DST_PORT": 32,
+    "PROTOCOL": 5,
+    "L7_PROTO": 32,
+    "TCP_FLAGS": 18
+  },
+  "source": "models/t_multi_class.onnx"
+}

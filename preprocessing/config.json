@@ -1,0 +1,163 @@
+{
+  "numerical_features": [
+    "IN_PKTS",
+    "OUT_PKTS",
+    "IN_BYTES",
+    "OUT_BYTES",
+    "FLOW_DURATION_MILLISECONDS"
+  ],
+  "categorical_features": [
+    "L4_SRC_PORT",
+    "L4_DST_PORT",
+    "PROTOCOL",
+    "L7_PROTO",
+    "TCP_FLAGS"
+  ],
+  "numerical_params": {
+    "IN_PKTS": {
+      "min": 0.0,
+      "range": 14.0
+    },
+    "OUT_PKTS": {
+      "min": 1.0,
+      "range": 17.0
+    },
+    "IN_BYTES": {
+      "min": 0.0,
+      "range": 840.0
+    },
+    "OUT_BYTES": {
+      "min": 60.0,
+      "range": 1020.0
+    },
+    "FLOW_DURATION_MILLISECONDS": {
+      "min": 0.0,
+      "range": 3207.0
+    }
+  },
+  "categorical_params": {
+    "L4_SRC_PORT": {
+      "levels": [
+        80,
+        15806,
+        44073,
+        17826,
+        43068,
+        6101,
+        10605,
+        24589,
+        31605,
+        13741,
+        14607,
+        16719,
+        26492,
+        27999,
+        30193,
+        48261,
+        50526,
+        6341,
+        8019,
+        10006,
+        10010,
+        10968,
+        11794,
+        15682,
+        23784,
+        29363,
+        29521,
+        30841,
+        33484,
+        35028,
+        43042,
+        44497
+      ],
+      "n_levels": 32
+    },
+    "L4_DST_PORT": {
+      "levels": [
+        80,
+        53,
+        32124,
+        8457,
+        8467,
+        46287,
+        2474,
+        8487,
+        11474,
+        14056,
+        17283,
+        18120,
+        18124,
+        22200,
+        22552,
+        24133,
+        25059,
+        26193,
+        26759,
+        30323,
+        33859,
+        33862,
+        36399,
+        37412,
+        38557,
+        39402,
+        39729,
+        41365,
+        42090,
+        42693,
+        42697,
+        45606
+      ],
+      "n_levels": 32
+    },
+    "PROTOCOL": {
+      "levels": [
+        6,
+        17,
+        1
+      ],
+      "n_levels": 3
+    },
+    "L7_PROTO": {
+      "levels": [
+        "HTTP",
+        "DNS",
+        "Unknown",
+        "MQTT",
+        "TLS",
+        "ICMP",
+        "RPC",
+        "AFP",
+        "BGP",
+        "FTP_CONTROL",
+        "FTP_DATA",
+        "IRC",
+        "LDAP",
+        "NetBIOS",
+        "POP3",
+        "RTSP",
+        "SSDP",
+        "Syslog",
+        "VMware"
+      ],
+      "n_levels": 19
+    },
+    "TCP_FLAGS": {
+      "levels": [
+        0,
+        2,
+        20,
+        22,
+        17,
+        24,
+        16,
+        26,
+        21
+      ],
+      "n_levels": 9
+    }
+  },
+  "window_size": 8,
+  "top_k": 32,
+  "clip_numerical": false
+}
