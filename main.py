@@ -35,6 +35,62 @@ DEFAULT_MODEL_EXPECTED_DIMS = {
 }
 
 
+def _extract_class_labels(payload):
+    """从 metadata payload 中提取类别标签列表。"""
+    labels = payload.get('class_labels', [])
+    if isinstance(labels, list) and len(labels) > 0:
+        return [str(x) for x in labels]
+
+    # 兼容 {"class_map": {"0": "Benign", "1": "DDoS"}}
+    class_map = payload.get('class_map', None)
+    if isinstance(class_map, dict) and len(class_map) > 0:
+        indexed = []
+        for k, v in class_map.items():
+            try:
+                idx = int(k)
+            except (TypeError, ValueError):
+                continue
+            indexed.append((idx, str(v)))
+        indexed.sort(key=lambda x: x[0])
+        return [label for _, label in indexed]
+
+    # 兼容 sklearn LabelEncoder 导出名
+    encoder_classes = payload.get('label_encoder_classes', [])
+    if isinstance(encoder_classes, list) and len(encoder_classes) > 0:
+        return [str(x) for x in encoder_classes]
+
+    return []
+
+
+def load_class_info_file(path):
+    """加载外部类别信息文件（可选）。"""
+    if path is None:
+        return None
+
+    class_info_path = os.path.abspath(path)
+    if not os.path.exists(class_info_path):
+        raise RuntimeError(f'Class info file not found: {class_info_path}')
+
+    with open(class_info_path, 'r', encoding='utf-8') as f:
+        payload = json.load(f)
+
+    labels = _extract_class_labels(payload)
+    benign_label = payload.get('benign_label', None)
+    benign_class_index = payload.get('benign_class_index', None)
+    if benign_class_index is not None:
+        try:
+            benign_class_index = int(benign_class_index)
+        except (TypeError, ValueError):
+            benign_class_index = None
+
+    return {
+        'path': class_info_path,
+        'class_labels': labels,
+        'benign_label': str(benign_label) if benign_label is not None else None,
+        'benign_class_index': benign_class_index,
+    }
+
+
 def load_model_metadata(model_path, model_meta_path=None):
     """加载模型元信息（输入顺序/类别维度）。"""
     model_abs = os.path.abspath(model_path)
@@ -79,7 +135,17 @@ def load_model_metadata(model_path, model_meta_path=None):
                 if v_int > 0:
                     dims[str(k)] = v_int
 
-        if not input_names and not dims:
+        class_labels = _extract_class_labels(payload)
+
+        benign_label = payload.get('benign_label', None)
+        benign_class_index = payload.get('benign_class_index', None)
+        if benign_class_index is not None:
+            try:
+                benign_class_index = int(benign_class_index)
+            except (TypeError, ValueError):
+                benign_class_index = None
+
+        if not input_names and not dims and not class_labels:
             print(f'WARNING: Model metadata {path} has no usable fields, skipped.')
             continue
 
@@ -87,6 +153,9 @@ def load_model_metadata(model_path, model_meta_path=None):
             'path': path,
             'input_names': input_names,
             'model_expected_dims': dims,
+            'class_labels': class_labels,
+            'benign_label': str(benign_label) if benign_label is not None else None,
+            'benign_class_index': benign_class_index,
         }
 
     return None
@@ -149,7 +218,17 @@ class FlowSlicer(NFPlugin):
 
 
 class RealTimeFlowInference:
-    def __init__(self, config_path, rknn_model_path, model_meta=None, allow_dim_mismatch=False):
+    def __init__(
+        self,
+        config_path,
+        rknn_model_path,
+        model_meta=None,
+        class_info=None,
+        benign_label='Benign',
+        benign_class_index=None,
+        binary_threshold=0.5,
+        allow_dim_mismatch=False,
+    ):
         """初始化实时流量推理系统"""
         self.allow_dim_mismatch = allow_dim_mismatch
         self.config_path = config_path
@@ -193,9 +272,52 @@ class RealTimeFlowInference:
                     if dim_int > 0:
                         self.model_expected_dims[str(feat)] = dim_int
 
+        self.class_labels = []
+        self.benign_label = str(benign_label) if benign_label is not None else 'Benign'
+        self.benign_class_index = benign_class_index
+        self.binary_threshold = float(np.clip(binary_threshold, 0.0, 1.0))
+
+        if isinstance(model_meta, dict):
+            meta_labels = model_meta.get('class_labels', [])
+            if isinstance(meta_labels, list) and len(meta_labels) > 0:
+                self.class_labels = [str(x) for x in meta_labels]
+
+            meta_benign = model_meta.get('benign_label', None)
+            if meta_benign is not None:
+                self.benign_label = str(meta_benign)
+
+            meta_benign_idx = model_meta.get('benign_class_index', None)
+            if meta_benign_idx is not None:
+                try:
+                    self.benign_class_index = int(meta_benign_idx)
+                except (TypeError, ValueError):
+                    pass
+
+        if isinstance(class_info, dict):
+            cls_labels = class_info.get('class_labels', [])
+            if isinstance(cls_labels, list) and len(cls_labels) > 0:
+                self.class_labels = [str(x) for x in cls_labels]
+
+            cls_benign = class_info.get('benign_label', None)
+            if cls_benign is not None:
+                self.benign_label = str(cls_benign)
+
+            cls_benign_idx = class_info.get('benign_class_index', None)
+            if cls_benign_idx is not None:
+                try:
+                    self.benign_class_index = int(cls_benign_idx)
+                except (TypeError, ValueError):
+                    pass
+
         print(f'  Input order source: {"model metadata" if model_meta else "built-in default"}')
         print(f'  Input names: {self.input_names}')
         print(f'  Expected categorical dims: {self.model_expected_dims}')
+        if len(self.class_labels) > 0:
+            print(f'  Class labels ({len(self.class_labels)}): {self.class_labels}')
+        print(f'  Benign label: {self.benign_label}')
+        if self.benign_class_index is not None:
+            print(f'  Benign class index: {self.benign_class_index}')
+        print(f'  Binary threshold: {self.binary_threshold:.4f}')
 
         # 诊断参数：前几次和固定间隔打印输入统计，便于排查恒定输出。
         self._inference_count = 0
@@ -252,6 +374,112 @@ class RealTimeFlowInference:
                 f'  {name}: shape={arr.shape}, min={arr_min:.6f}, max={arr_max:.6f}, '
                 f'mean={arr_mean:.6f}, std={arr_std:.6f}, nz={non_zero}/{arr.size}'
             )
+
+    @staticmethod
+    def _sigmoid(x):
+        return 1.0 / (1.0 + np.exp(-x))
+
+    def _normalize_binary_probability(self, value):
+        prob = float(value)
+        if not np.isfinite(prob):
+            return 0.0
+        if prob < 0.0 or prob > 1.0:
+            prob = float(self._sigmoid(prob))
+        return float(np.clip(prob, 0.0, 1.0))
+
+    def _resolve_benign_index(self, n_classes):
+        if self.benign_class_index is not None and 0 <= int(self.benign_class_index) < n_classes:
+            return int(self.benign_class_index)
+
+        if len(self.class_labels) == n_classes:
+            target = self.benign_label.strip().lower()
+            for i, name in enumerate(self.class_labels):
+                if str(name).strip().lower() == target:
+                    return i
+
+        if n_classes == 2:
+            return 0
+
+        return None
+
+    def _interpret_output(self, output_array):
+        arr = np.asarray(output_array)
+        flat = arr.reshape(-1)
+
+        if arr.ndim == 2 and arr.shape[0] > 0:
+            vec = arr[0].astype(np.float64)
+        elif arr.ndim == 1:
+            vec = arr.astype(np.float64)
+        else:
+            vec = flat.astype(np.float64)
+
+        if vec.size == 0:
+            return {
+                'task_type': 'unknown',
+                'predicted_class': 0,
+                'predicted_label': None,
+                'confidence': 0.0,
+                'max_probability': 0.0,
+                'is_attack': False,
+                'attack_type': None,
+                'attack_probability': 0.0,
+            }
+
+        # 单输出：按二分类概率处理（必要时做 sigmoid）。
+        if vec.size == 1:
+            attack_prob = self._normalize_binary_probability(vec[0])
+            predicted_class = 1 if attack_prob >= self.binary_threshold else 0
+
+            if len(self.class_labels) == 2:
+                labels = self.class_labels
+            else:
+                labels = [self.benign_label, 'Attack']
+
+            predicted_label = labels[predicted_class]
+            is_attack = predicted_class == 1
+            confidence = attack_prob if is_attack else (1.0 - attack_prob)
+            max_probability = max(attack_prob, 1.0 - attack_prob)
+
+            return {
+                'task_type': 'binary',
+                'predicted_class': predicted_class,
+                'predicted_label': predicted_label,
+                'confidence': float(confidence),
+                'max_probability': float(max_probability),
+                'is_attack': bool(is_attack),
+                'attack_type': predicted_label if is_attack else None,
+                'attack_probability': float(attack_prob),
+            }
+
+        # 多输出：按多分类处理（2 类输出同样适配）。
+        predicted_class = int(np.argmax(vec))
+        confidence = float(vec[predicted_class]) if np.isfinite(vec[predicted_class]) else 0.0
+        max_probability = float(np.nanmax(vec)) if np.isfinite(np.nanmax(vec)) else 0.0
+
+        predicted_label = None
+        if len(self.class_labels) == vec.size:
+            predicted_label = self.class_labels[predicted_class]
+
+        benign_index = self._resolve_benign_index(vec.size)
+        if benign_index is None:
+            is_attack = max_probability >= self.binary_threshold
+        else:
+            is_attack = predicted_class != benign_index
+
+        attack_type = None
+        if is_attack:
+            attack_type = predicted_label if predicted_label is not None else str(predicted_class)
+
+        return {
+            'task_type': 'multiclass' if vec.size > 2 else 'binary-2class',
+            'predicted_class': predicted_class,
+            'predicted_label': predicted_label,
+            'confidence': float(confidence),
+            'max_probability': float(max_probability),
+            'is_attack': bool(is_attack),
+            'attack_type': attack_type,
+            'attack_probability': float(confidence),
+        }
     
     def flow_to_dataframe(self, flow):
         """将NFStreamer的flow对象转换为DataFrame"""
@@ -346,32 +574,19 @@ class RealTimeFlowInference:
             
             # 获取输出值（处理不同的输出格式）
             output_array = outputs[0] if isinstance(outputs, (list, tuple)) and len(outputs) > 0 else outputs
-            if isinstance(output_array, np.ndarray):
-                # 如果是分类输出（多类），取最大概率值；如果是二分类，取第二个值或最大值
-                if len(output_array.shape) == 2:
-                    # 形状为 (batch, classes)
-                    if output_array.shape[1] > 1:
-                        # 多分类：取最大概率值作为异常分数
-                        max_prob = np.max(output_array, axis=1)[0]
-                        predicted_class = np.argmax(output_array, axis=1)[0]
-                    else:
-                        # 单输出：直接使用
-                        max_prob = output_array[0, 0] if output_array.shape[1] == 1 else output_array[0]
-                        predicted_class = 0
-                elif len(output_array.shape) == 1:
-                    # 一维数组
-                    max_prob = np.max(output_array)
-                    predicted_class = np.argmax(output_array)
-                else:
-                    # 其他形状，取最大值
-                    max_prob = np.max(output_array)
-                    predicted_class = 0
-            else:
-                max_prob = float(output_array) if isinstance(output_array, (int, float)) else 0.0
-                predicted_class = 0
+            interpreted = self._interpret_output(output_array)
+            max_prob = float(interpreted.get('max_probability', 0.0))
+            predicted_class = int(interpreted.get('predicted_class', 0))
 
-            output_std = float(np.std(output_array)) if isinstance(output_array, np.ndarray) else 0.0
-            if output_std < 1e-7:
+            output_std = float(np.std(output_array)) if isinstance(output_array, np.ndarray) and output_array.size > 1 else 0.0
+            has_non_finite = False
+            if isinstance(output_array, np.ndarray):
+                has_non_finite = not np.all(np.isfinite(output_array))
+
+            if has_non_finite:
+                print('WARNING: Model output contains non-finite values (NaN/Inf). '
+                      'Please verify exported ONNX/RKNN integrity.')
+            elif isinstance(output_array, np.ndarray) and output_array.size > 1 and output_std < 1e-7:
                 print('WARNING: Model output is near-uniform (std≈0). '
                       'Please verify model file/version and preprocessing config consistency.')
             
@@ -381,6 +596,12 @@ class RealTimeFlowInference:
                 'inference_time_ms': inference_time,
                 'max_probability': max_prob,
                 'predicted_class': predicted_class,
+                'predicted_label': interpreted.get('predicted_label', None),
+                'task_type': interpreted.get('task_type', 'unknown'),
+                'confidence': float(interpreted.get('confidence', max_prob)),
+                'is_attack': bool(interpreted.get('is_attack', False)),
+                'attack_type': interpreted.get('attack_type', None),
+                'attack_probability': float(interpreted.get('attack_probability', max_prob)),
                 'output_std': output_std,
                 'flow_info': {
                     'src_port': flow.src_port,
@@ -409,6 +630,11 @@ if __name__ == '__main__':
     parser.add_argument('-m', '--model', required=True, help="Path to the RKNN model file (required)")
     parser.add_argument('-c', '--config', default='./config/config.json', help="Path to the preprocessor config file (default: ./config/config.json)")
     parser.add_argument('--model-meta', default=None, help="Optional model metadata json path (contains input order/dims). If omitted, auto-detect from model sidecar")
+    parser.add_argument('--class-info', default=None, help="Optional class info json path (class_labels/class_map/benign fields)")
+    parser.add_argument('--class-labels', default=None, help="Comma-separated class labels override, e.g. 'Benign,DDoS,DoS'")
+    parser.add_argument('--benign-label', default=None, help="Benign class label name (used for attack decision)")
+    parser.add_argument('--benign-class-index', type=int, default=None, help="Benign class index override (used for attack decision)")
+    parser.add_argument('--binary-threshold', type=float, default=0.5, help="Threshold for binary attack decision (default: 0.5)")
     parser.add_argument('--auto-align-config', action='store_true', help="Auto-generate an aligned config using model expected categorical dims")
     parser.add_argument('--aligned-config-out', default='./config/config.aligned_to_model.json', help="Output path for auto-aligned config (used with --auto-align-config)")
     parser.add_argument('--allow-dim-mismatch', action='store_true', help="Force run even if config categorical dims mismatch model dims")
@@ -434,6 +660,38 @@ if __name__ == '__main__':
     if model_meta:
         print(f'Using model metadata: {model_meta["path"]}')
 
+    class_info = None
+    if args.class_info:
+        try:
+            class_info = load_class_info_file(args.class_info)
+            print(f'Using class info: {class_info["path"]}')
+        except Exception as e:
+            print(f'Failed to load class info: {e}')
+            exit(1)
+
+    runtime_class_info = {}
+    if isinstance(class_info, dict):
+        if isinstance(class_info.get('class_labels'), list) and len(class_info['class_labels']) > 0:
+            runtime_class_info['class_labels'] = [str(x) for x in class_info['class_labels']]
+        if class_info.get('benign_label') is not None:
+            runtime_class_info['benign_label'] = str(class_info['benign_label'])
+        if class_info.get('benign_class_index') is not None:
+            runtime_class_info['benign_class_index'] = int(class_info['benign_class_index'])
+
+    if args.class_labels:
+        parsed_labels = [s.strip() for s in args.class_labels.split(',') if len(s.strip()) > 0]
+        if len(parsed_labels) > 0:
+            runtime_class_info['class_labels'] = parsed_labels
+
+    if args.benign_label is not None:
+        runtime_class_info['benign_label'] = str(args.benign_label)
+
+    if args.benign_class_index is not None:
+        runtime_class_info['benign_class_index'] = int(args.benign_class_index)
+
+    if len(runtime_class_info) == 0:
+        runtime_class_info = None
+
     effective_expected_dims = dict(DEFAULT_MODEL_EXPECTED_DIMS)
     if model_meta and isinstance(model_meta.get('model_expected_dims'), dict):
         effective_expected_dims.update(model_meta['model_expected_dims'])
@@ -457,6 +715,8 @@ if __name__ == '__main__':
             config_path,
             rknn_model,
             model_meta=model_meta,
+            class_info=runtime_class_info,
+            binary_threshold=args.binary_threshold,
             allow_dim_mismatch=args.allow_dim_mismatch
         )
     except Exception as e:
@@ -490,6 +750,13 @@ if __name__ == '__main__':
             if result:
                 output = result['output']
                 max_prob = result.get('max_probability', 0.0)
+                confidence = result.get('confidence', max_prob)
+                predicted_class = result.get('predicted_class', 0)
+                predicted_label = result.get('predicted_label', None)
+                task_type = result.get('task_type', 'unknown')
+                is_attack = bool(result.get('is_attack', False))
+                attack_type = result.get('attack_type', None)
+                attack_prob = result.get('attack_probability', max_prob)
                 
                 if isinstance(output, np.ndarray):
                     print(f'\n[Flow #{cnt}] Inference completed')
@@ -500,17 +767,16 @@ if __name__ == '__main__':
                     print(f'  Output vector: {np.array2string(output.reshape(-1), precision=8, separator=", ")}')
                     print(f'  Output std: {result.get("output_std", 0.0):.8f}')
                     print(f'  Max probability: {max_prob:.8f}')
-                    
-                    # 如果输出是分类结果，显示预测类别
-                    if len(output.shape) == 2 and output.shape[1] > 1:
-                        predicted_class = result.get('predicted_class', 0)
-                        confidence = output[0, predicted_class] if output.shape[0] > 0 else max_prob
+                    print(f'  Task type: {task_type}')
+                    if predicted_label is not None:
+                        print(f'  Predicted class: {predicted_class} ({predicted_label}), confidence: {confidence:.8f}')
+                    else:
                         print(f'  Predicted class: {predicted_class}, confidence: {confidence:.8f}')
-                    
-                    # 如果检测到异常（概率大于0.5），打印IP信息
-                    if max_prob > 0.5:
+
+                    if is_attack:
                         separator = '=' * 60
-                        print(f'\n  ⚠️  ALERT: Anomaly detected (probability: {max_prob:.4f} > 0.5)')
+                        alert_label = attack_type if attack_type is not None else str(predicted_class)
+                        print(f'\n  ⚠️  ALERT: Attack detected ({alert_label}, probability: {attack_prob:.4f})')
                         print(f'  {separator}')
                         # print(f'  Window IP Information (last {len(result["window_ip_info"])} flows):')
                         # for i, ip_info in enumerate(result['window_ip_info']):
@@ -529,6 +795,8 @@ if __name__ == '__main__':
                             print(f'      Destination Port: {current_flow["dst_port"]}')
                             print(f'      Protocol: {current_flow["protocol"]} ({current_flow["l7_proto"]})')
                         print(f'  {separator}\n')
+                    else:
+                        print(f'  Status: benign')
             else:
                 print(f'[Flow #{cnt}] Added to window (window size: {len(inference_system.flow_window)})')
                 
