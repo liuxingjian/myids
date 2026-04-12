@@ -16,7 +16,19 @@
     "L4_DST_PORT": 32,
     "PROTOCOL": 5,
     "L7_PROTO": 32,
-    "TCP_FLAGS": 18
+    "TCP_FLAGS": 17
   },
-  "model_output_name": "multiclass_classification_out/Softmax"
+  "model_output_name": "multiclass_classification_out/Softmax",
+  "class_map": {
+    "0": "Benign",
+    "1": "tcp",
+    "2": "udp"
+  },
+  "class_labels": [
+    "Benign",
+    "tcp",
+    "udp"
+  ],
+  "benign_label": "Benign",
+  "benign_class_index": 0
 }
