@@ -13,6 +13,7 @@
   - [流量采集](#1-流量采集)
   - [数据预处理](#2-数据预处理)
   - [实时检测](#3-实时检测)
+  - [训练与跨机模型转换](#4-训练与跨机模型转换)
 - [配置说明](#配置说明)
 - [注意事项](#注意事项)
 
@@ -59,9 +60,13 @@ ai-ids/
 │   ├── preprocess_dataframe.py         # 数据预处理工具类
 │   └── config.json                    # 预处理配置文件
 ├── models/                   # 模型文件目录
-│   └── ids_transformer_model_new.rknn # RKNN模型文件
+│   ├── transformer_multi_class_model.rknn
+│   ├── transformer_multi_class_model.meta.json
+│   └── t_multi_class.onnx
 ├── config/                   # 配置文件目录
 │   └── config.json          # 主配置文件
+├── tools/
+│   └── onnx_to_rknn.py      # ONNX 转 RKNN 独立脚本
 ├── main.py                   # 主程序入口
 └── README.md                # 项目说明文档
 ```
@@ -95,6 +100,13 @@ python flow_collection/flow_collection_to_csv.py
 ```
 
 输出文件：`./flows.csv`
+
+
+#### 转成标准格式
+
+
+python tools/raw_to_nfv1.py --input ./flows.0.csv --attack attack --output ./cache/converted_attack.csv
+
 
 #### 方式二：实时输出到终端
 
@@ -151,19 +163,28 @@ preprocessed_df = preprocessor.preprocess_dataframe(df)
 
 ### 3. 实时检测
 
-运行主程序进行实时流量监控和异常检测：
+运行主程序进行实时流量监控和异常检测（`-m` 为必填）：
 
 ```bash
-python main.py [网络接口]
+python main.py -m ./models/transformer_multi_class_model.rknn [网络接口]
 ```
 
 **示例**：
 ```bash
 # 监控 eth0 接口
-python main.py eth0
+python main.py -m ./models/transformer_multi_class_model.rknn --auto-align-config eth0
 
 # 监控其他接口
-python main.py enp1s0
+python main.py -m ./models/transformer_multi_class_model.rknn --auto-align-config enp1s0
+
+# 显式指定模型元信息（推荐）
+python main.py -m ./models/transformer_multi_class_model.rknn \
+  --model-meta ./models/transformer_multi_class_model.meta.json \
+  --auto-align-config
+
+# 若元信息中暂无标签，可临时手工覆盖标签名
+python main.py -m ./models/transformer_multi_class_model.rknn \
+  --class-labels Benign,tcp,udp --benign-label Benign --auto-align-config
 ```
 
 **程序流程**：
@@ -179,11 +200,12 @@ python main.py enp1s0
 [Flow #100] Inference completed
   Flow info: {'src_port': 443, 'dst_port': 54321, 'protocol': 6, 'l7_proto': 'TLS'}
   Inference time: 15.23 ms
-  Output shape: (1, 2)
-  Max probability: 0.0234
-  Predicted class: 0, confidence: 0.9766
+  Output shape: (1, 3)
+  Max probability: 0.9766
+  Task type: multiclass
+  Predicted label: Benign, confidence: 0.9766 (class_index=0)
 
-⚠️  ALERT: Anomaly detected (probability: 0.8234 > 0.5)
+⚠️  ALERT: Attack detected (tcp, probability: 0.8234)
   🎯 Current Flow (most recent):
       Source IP: 192.168.1.100
       Destination IP: 10.0.0.50
@@ -192,19 +214,48 @@ python main.py enp1s0
       Protocol: 6 (HTTP)
 ```
 
+### 4. 训练与跨机模型转换
+
+推荐使用“训练机导出 ONNX + metadata，转换机转 RKNN”的流程：
+
+1. 在训练机运行 `FlowTransformer_MultiClassification_Extension/multi_classification_demo.ipynb`。
+2. 导出 cell 会生成：
+  - `models/t_multi_class.onnx`
+  - `models/t_multi_class.meta.json`
+3. `*.meta.json` 会包含：
+  - 模型输入顺序：`model_input_names`
+  - 类别特征维度：`model_expected_dims`
+  - 类别映射：`class_map`、`class_labels`
+  - 良性类别信息：`benign_label`、`benign_class_index`
+4. 将 ONNX + metadata 拷贝到转换机，执行：
+
+```bash
+python tools/onnx_to_rknn.py \
+  --onnx ./models/t_multi_class.onnx \
+  --output ./models/transformer_multi_class_model.rknn \
+  --target rk3588 \
+  --copy-meta
+```
+
+5. 推理时主程序会优先读取 RKNN 同名 sidecar（`*.meta.json`），自动显示攻击类型名称，而不是仅显示类别索引数字。
+
 ## ⚙️ 配置说明
 
 ### 主程序配置
 
-在 `main.py` 中修改以下路径配置：
+主程序通过命令行参数配置，无需修改代码中的硬编码路径。
 
-```python
-# 预处理配置文件路径
-config_path = "/home/lemon/zzu/ai-ids/config/config.json"
-
-# RKNN 模型文件路径
-rknn_model = "/home/lemon/zzu/ai-ids/models/ids_transformer_model_new.rknn"
-```
+常用参数：
+- `-m/--model`：RKNN 模型路径（必填）
+- `-c/--config`：预处理配置路径
+- `--model-meta`：模型元信息 JSON 路径（可选，默认自动找同名 sidecar）
+- `--class-info`：外部类别信息 JSON（可选）
+- `--class-labels`：手工标签覆盖（逗号分隔）
+- `--benign-label`：良性标签名
+- `--benign-class-index`：良性类别索引
+- `--binary-threshold`：二分类阈值
+- `--auto-align-config`：按模型期望维度自动对齐配置
+- `--allow-dim-mismatch`：允许维度不一致时强制运行（不推荐）
 
 ### 预处理配置
 
@@ -236,14 +287,14 @@ rknn_model = "/home/lemon/zzu/ai-ids/models/ids_transformer_model_new.rknn"
 
 1. **权限要求**：实时流量采集需要 root 权限或 CAP_NET_RAW 权限
    ```bash
-   sudo python main.py eth0
+  sudo python main.py -m ./models/transformer_multi_class_model.rknn --auto-align-config eth0
    ```
 
 2. **网络接口**：确保指定的网络接口存在且处于活动状态
 
 3. **模型兼容性**：确保 RKNN 模型文件与当前硬件平台兼容
 
-4. **配置文件路径**：确保预处理配置文件和模型文件路径正确
+4. **metadata 一致性**：建议始终携带模型 sidecar（`*.meta.json`），否则可能只能显示类别索引（如 0/1/2）
 
 5. **滑动窗口**：系统需要累积足够数量的流（达到窗口大小）才开始推理
 
@@ -271,13 +322,13 @@ make -j
 
 ```bash
 ./ai_ids_shm_consumer \
-  ../models/ids_transformer_model_new.rknn \
+  ../models/transformer_multi_class_model.rknn \
   /dev/shm/ai_ids_feature_shm \
   2097152
 ```
 
 参数说明：
-- 第1个参数：RKNN模型路径（可选，默认 `models/ids_transformer_model_new.rknn`）
+- 第1个参数：RKNN模型路径（可选，默认 `models/transformer_multi_class_model.rknn`）
 - 第2个参数：共享内存文件路径（可选，默认 `/dev/shm/ai_ids_feature_shm`）
 - 第3个参数：共享内存大小字节数（可选，默认 `2097152`）
 

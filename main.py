@@ -769,7 +769,7 @@ if __name__ == '__main__':
                     print(f'  Max probability: {max_prob:.8f}')
                     print(f'  Task type: {task_type}')
                     if predicted_label is not None:
-                        print(f'  Predicted class: {predicted_class} ({predicted_label}), confidence: {confidence:.8f}')
+                        print(f'  Predicted label: {predicted_label}, confidence: {confidence:.8f} (class_index={predicted_class})')
                     else:
                         print(f'  Predicted class: {predicted_class}, confidence: {confidence:.8f}')
 
